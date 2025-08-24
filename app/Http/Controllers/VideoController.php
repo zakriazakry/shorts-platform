@@ -28,8 +28,6 @@ class VideoController extends Controller
 
         // ⚠️ مسار Python الفعلي على جهازك
         $pythonPath = "C:\\Users\\Tags6\\AppData\\Local\\Programs\\Python\\Python312\\python.exe";
-
-        // 1️⃣ تحميل الفيديو عبر yt-dlp
         $downloadProcess = new Process([
             $pythonPath,
             "-m",
