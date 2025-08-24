@@ -9,105 +9,61 @@ use Illuminate\Support\Facades\Validator;
 
 class VideoController extends Controller
 {
+
     public function createShorts(Request $request)
     {
-        $request->validate([
+        $validator = Validator::make($request->all(), [
             'videoUrl' => 'required|string',
             'caption' => 'nullable|string',
             'logo' => 'nullable|file|mimes:png,jpg,jpeg'
         ]);
 
-        $videoUrl = $request->videoUrl;
-        $caption = $request->caption ?? '';
-        $logoPath = $request->hasFile('logo') ? $request->file('logo')->getPathName() : null;
-
-        $storageDir = storage_path('app/public/shorts');
-        if (!file_exists($storageDir)) mkdir($storageDir, 0777, true);
-
-        $fullVideoPath = $storageDir . '/video.mp4';
-
-        // ⚠️ مسار Python الفعلي على جهازك
-        $pythonPath = "C:\\Users\\Tags6\\AppData\\Local\\Programs\\Python\\Python312\\python.exe";
-        $downloadProcess = new Process([
-            $pythonPath,
-            "-m",
-            "yt_dlp",
-            "-f",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/mp4",
-            "-o",
-            $fullVideoPath,
-            $videoUrl
-        ]);
-        $downloadProcess->run();
-
-        if (!$downloadProcess->isSuccessful()) {
+        if ($validator->fails()) {
             return response()->json([
-                'error' => $downloadProcess->getErrorOutput()
-            ], 500);
+                'errors' => $validator->errors()
+            ], 422);
         }
 
-        // 2️⃣ الحصول على طول الفيديو
-        $ffprobe = new Process(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", $fullVideoPath]);
-        $ffprobe->run();
-        $duration = floatval(trim($ffprobe->getOutput()));
+        $videoPath = storage_path('app/public/video.mp4');
+        $logoPath = $request->hasFile('logo') ? $request->file('logo')->getPathName() : null;
 
-        $shorts = [];
-        $maxLength = 60; // أقصى طول للشورت بالثواني
+        // تحميل الفيديو
+        $process = new Process(["yt-dlp", "-o", $videoPath, $request->videoUrl]);
+        $process->run();
+        if (!$process->isSuccessful()) return response()->json(['error' => 'Failed to download video'], 500);
+
+        // معرفة مدة الفيديو بالثواني
+        $ffprobe = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {$videoPath}";
+        $durationProcess = Process::fromShellCommandline($ffprobe);
+        $durationProcess->run();
+        $totalDuration = (int) trim($durationProcess->getOutput());
+
+        $shortUrls = [];
         $start = 0;
         $index = 1;
 
-        // 3️⃣ تقسيم الفيديو لشورتات ≤ دقيقة
-        while ($start < $duration) {
-            $end = min($start + $maxLength, $duration);
-            $shortPath = $storageDir . "/short_{$index}.mp4";
+        while ($start < $totalDuration) {
+            $duration = min(60, $totalDuration - $start); // كل شورت ≤ 60 ثانية
+            $outputPath = storage_path("app/public/final_{$index}.mp4");
 
-            // إعداد فلتر FFmpeg للشورت (كابشن + شعار)
-            $filter = "";
-            if ($caption) {
-                $filter .= "drawtext=text='{$caption}':fontcolor=white:fontsize=36:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-text_w)/2:y=h-80";
-            }
-            if ($logoPath) {
-                $filter = "[0:v][1:v]overlay=W-w-10:10," . $filter;
-            }
+            // تحضير الفلتر (شعار + كابشن)
+            $filter = "drawtext=text='{$request->caption}':fontcolor=white:fontsize=36:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-text_w)/2:y=h-80";
+            if ($logoPath) $filter = "[0:v][1:v]overlay=W-w-10:10," . $filter;
 
-            $ffmpegCmd = [
-                "ffmpeg",
-                "-i",
-                $fullVideoPath,
-            ];
+            $command = "ffmpeg -i {$videoPath}" . ($logoPath ? " -i {$logoPath}" : "") .
+                " -ss {$start} -t {$duration} -filter_complex \"{$filter}\" -c:v libx264 -c:a copy -shortest {$outputPath}";
 
-            if ($logoPath) $ffmpegCmd[] = "-i" . $logoPath;
+            $process = Process::fromShellCommandline($command);
+            $process->run();
+            if (!$process->isSuccessful()) return response()->json(['error' => 'Failed to process video at part ' . $index], 500);
 
-            $ffmpegCmd = array_merge($ffmpegCmd, [
-                "-ss",
-                strval($start),
-                "-to",
-                strval($end),
-                "-filter_complex",
-                $filter ?: "null",
-                "-c:v",
-                "libx264",
-                "-c:a",
-                "aac",
-                "-shortest",
-                $shortPath
-            ]);
-
-            $ffmpegProcess = new Process($ffmpegCmd);
-            $ffmpegProcess->run();
-
-            if (!$ffmpegProcess->isSuccessful()) {
-                return response()->json(['error' => $ffmpegProcess->getErrorOutput()], 500);
-            }
-
-            $shorts[] = asset("storage/shorts/short_{$index}.mp4");
-            $start = $end;
+            $shortUrls[] = asset("storage/final_{$index}.mp4");
+            $start += $duration;
             $index++;
         }
 
         return response()->json([
-            'message' => 'Video split into shorts successfully!',
-            'shorts' => $shorts
+            'shorts' => $shortUrls
         ]);
     }
 }
