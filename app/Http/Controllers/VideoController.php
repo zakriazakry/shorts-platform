@@ -30,7 +30,7 @@ class VideoController extends Controller
         // تحميل الفيديو
         $process = new Process(["yt-dlp", "-o", $videoPath, $request->videoUrl]);
         $process->run();
-        if (!$process->isSuccessful()) return response()->json(['error' => $process->getErrorOutput()], 500);
+        if (!$process->isSuccessful()) return response()->json(['error' => $process->getOutput()], 500);
 
         // معرفة مدة الفيديو بالثواني
         $ffprobe = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {$videoPath}";
