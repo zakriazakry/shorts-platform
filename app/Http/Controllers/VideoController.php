@@ -28,7 +28,7 @@ class VideoController extends Controller
         $logoPath = $request->hasFile('logo') ? $request->file('logo')->getPathName() : null;
 
         // تحميل الفيديو
-        $process = new Process([base_path('tools/yt-dlp'),, "-o", $videoPath, $request->videoUrl]);
+        $process = new Process([base_path('tools/yt-dlp'), "-o", $videoPath, $request->videoUrl]);
         $process->run();
         if (!$process->isSuccessful()) return response()->json(['error' => $process->getOutput()], 500);
 
